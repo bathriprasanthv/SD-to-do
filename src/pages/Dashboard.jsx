@@ -1,22 +1,32 @@
 import React, { useState, useEffect, useContext, useMemo } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
+import { ToastContext } from '../context/ToastContext';
 import { getTodos, saveTodos } from '../utils/localStorage';
-import TodoForm from '../components/TodoForm';
 import TodoItem from '../components/TodoItem';
-import { Search, LogOut } from 'lucide-react';
+import TaskModal from '../components/TaskModal';
+import ConfirmDialog from '../components/ConfirmDialog';
+import EmptyState from '../components/EmptyState';
+import { Search, Plus, ListTodo, Clock, CalendarDays, CheckCircle2 } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 
 const Dashboard = () => {
-  const { user, logout } = useContext(AuthContext);
-  const navigate = useNavigate();
+  const { user } = useContext(AuthContext);
+  const { addToast } = useContext(ToastContext);
+  const location = useLocation();
 
   const [todos, setTodos] = useState([]);
+  
+  // Modals state
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTodo, setEditingTodo] = useState(null);
+  
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [todoToDelete, setTodoToDelete] = useState(null);
 
   // Filters & Sort
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState('All');
-  const [sortBy, setSortBy] = useState('dueDateAsc');
+  const [sortBy, setSortBy] = useState('recentlyCreated');
 
   useEffect(() => {
     if (user) {
@@ -24,21 +34,22 @@ const Dashboard = () => {
       setTodos(userTodos);
     }
   }, [user]);
-
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
+  
+  // Set filter based on current route
+  useEffect(() => {
+    if (location.pathname === '/tasks') setFilter('All');
+    else if (location.pathname === '/today') setFilter('Today');
+    else if (location.pathname === '/upcoming') setFilter('Upcoming');
+    else if (location.pathname === '/completed') setFilter('Completed');
+    else if (location.pathname === '/high-priority') setFilter('High Priority');
+    else setFilter('All'); // default dashboard
+  }, [location.pathname]);
 
   const handleAddOrUpdateTodo = (todoData) => {
     let updatedTodos;
     if (editingTodo) {
       updatedTodos = todos.map(t => t.id === editingTodo.id ? { ...t, ...todoData } : t);
-      setEditingTodo(null);
+      addToast('Task updated successfully');
     } else {
       const newTodo = {
         ...todoData,
@@ -46,26 +57,40 @@ const Dashboard = () => {
         createdAt: new Date().toISOString()
       };
       updatedTodos = [...todos, newTodo];
+      addToast('Task created successfully');
     }
     setTodos(updatedTodos);
     saveTodos(user.id, updatedTodos);
+    setIsModalOpen(false);
+    setEditingTodo(null);
   };
 
-  const handleDeleteTodo = (id) => {
-    const updatedTodos = todos.filter(t => t.id !== id);
-    setTodos(updatedTodos);
-    saveTodos(user.id, updatedTodos);
+  const confirmDelete = (todo) => {
+    setTodoToDelete(todo);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleDeleteTodo = () => {
+    if (todoToDelete) {
+      const updatedTodos = todos.filter(t => t.id !== todoToDelete.id);
+      setTodos(updatedTodos);
+      saveTodos(user.id, updatedTodos);
+      addToast('Task deleted successfully');
+      setDeleteConfirmOpen(false);
+      setTodoToDelete(null);
+    }
   };
 
   const handleStatusChange = (id, newStatus) => {
     const updatedTodos = todos.map(t => t.id === id ? { ...t, status: newStatus } : t);
     setTodos(updatedTodos);
     saveTodos(user.id, updatedTodos);
+    addToast(`Task marked as ${newStatus}`, 'success');
   };
 
-  const handleEditTodo = (todo) => {
+  const openEditModal = (todo) => {
     setEditingTodo(todo);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setIsModalOpen(true);
   };
 
   // Compute stats
@@ -78,31 +103,66 @@ const Dashboard = () => {
   const filteredAndSortedTodos = useMemo(() => {
     let result = todos;
 
-    // Search
+    // Search (title and description)
     if (searchQuery) {
-      result = result.filter(t => t.title.toLowerCase().includes(searchQuery.toLowerCase()));
+      const query = searchQuery.toLowerCase();
+      result = result.filter(t => 
+        t.title.toLowerCase().includes(query) || 
+        (t.description && t.description.toLowerCase().includes(query))
+      );
     }
 
     // Filter
     if (filter !== 'All') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
       if (filter === 'High Priority') {
         result = result.filter(t => t.priority === 'High');
-      } else {
-        result = result.filter(t => t.status === filter);
+      } else if (filter === 'Completed') {
+        result = result.filter(t => t.status === 'Completed');
+      } else if (filter === 'Pending') {
+        result = result.filter(t => t.status === 'Pending');
+      } else if (filter === 'In Progress') {
+        result = result.filter(t => t.status === 'In Progress');
+      } else if (filter === 'Today') {
+        result = result.filter(t => {
+          if (!t.dueDate) return false;
+          const due = new Date(t.dueDate);
+          due.setHours(0,0,0,0);
+          return due.getTime() === today.getTime();
+        });
+      } else if (filter === 'Upcoming') {
+        result = result.filter(t => {
+          if (!t.dueDate) return false;
+          const due = new Date(t.dueDate);
+          due.setHours(0,0,0,0);
+          return due.getTime() > today.getTime() && t.status !== 'Completed';
+        });
       }
     }
 
+    // Default dashboard: if no specific route filter, maybe limit to recent tasks or show all
+    // Let's just show all on dashboard for now, but sort by recent.
+
     // Sort
     result = [...result].sort((a, b) => {
-      if (sortBy.startsWith('priority')) {
+      if (sortBy === 'recentlyCreated') {
+        return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+      } else if (sortBy === 'priorityDesc') {
         const priorityScore = { 'High': 3, 'Medium': 2, 'Low': 1 };
-        const scoreA = priorityScore[a.priority] || 0;
-        const scoreB = priorityScore[b.priority] || 0;
-        return sortBy === 'priorityDesc' ? scoreA - scoreB : scoreB - scoreA;
-      } else if (sortBy.startsWith('dueDate')) {
+        return (priorityScore[b.priority] || 0) - (priorityScore[a.priority] || 0);
+      } else if (sortBy === 'priorityAsc') {
+        const priorityScore = { 'High': 3, 'Medium': 2, 'Low': 1 };
+        return (priorityScore[a.priority] || 0) - (priorityScore[b.priority] || 0);
+      } else if (sortBy === 'dueDateAsc') {
         const dateA = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
         const dateB = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
-        return sortBy === 'dueDateAsc' ? dateA - dateB : dateB - dateA;
+        return dateA - dateB;
+      } else if (sortBy === 'dueDateDesc') {
+        const dateA = a.dueDate ? new Date(a.dueDate).getTime() : -Infinity;
+        const dateB = b.dueDate ? new Date(b.dueDate).getTime() : -Infinity;
+        return dateB - dateA;
       }
       return 0;
     });
@@ -110,104 +170,124 @@ const Dashboard = () => {
     return result;
   }, [todos, searchQuery, filter, sortBy]);
 
+  const getEmptyStateMessage = () => {
+    if (searchQuery) return { title: 'No results found', message: `No tasks match "${searchQuery}"`, action: null };
+    if (filter === 'Today') return { title: 'Clear schedule', message: 'You have no tasks due today.', action: 'Add Task' };
+    if (filter === 'Completed') return { title: 'No completed tasks', message: 'Completed tasks will appear here.', action: null };
+    if (filter === 'Upcoming') return { title: 'No upcoming tasks', message: 'You have no upcoming deadlines.', action: 'Add Task' };
+    if (filter === 'High Priority') return { title: 'No high priority tasks', message: 'Take a break, no urgent tasks.', action: null };
+    return { title: 'No tasks yet', message: 'Create your first task to get started.', action: 'Create Task' };
+  };
+
+  const emptyState = getEmptyStateMessage();
+
   return (
-    <div className="container" style={{ paddingBottom: '3rem' }}>
-      <nav className="navbar">
-        <div className="container navbar-content">
-          <h1>TodoApp</h1>
-          <div className="user-info">
-            <span>Welcome, {user.name}</span>
-            <button onClick={handleLogout} className="btn btn-outline btn-small" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <LogOut size={16} /> Logout
-            </button>
+    <>
+      {location.pathname === '/dashboard' && (
+        <div className="stat-grid">
+          <div className="stat-card">
+            <div style={{ padding: '1rem', borderRadius: '50%', backgroundColor: 'rgba(79, 70, 229, 0.1)', color: 'var(--primary-color)' }}>
+              <ListTodo size={24} />
+            </div>
+            <div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', fontWeight: '500' }}>Total Tasks</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: '700' }}>{totalTasks}</div>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div style={{ padding: '1rem', borderRadius: '50%', backgroundColor: 'rgba(245, 158, 11, 0.1)', color: 'var(--warning-color)' }}>
+              <Clock size={24} />
+            </div>
+            <div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', fontWeight: '500' }}>Pending</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: '700' }}>{pendingTasks}</div>
+            </div>
+          </div>
+          <div className="stat-card">
+            <div style={{ padding: '1rem', borderRadius: '50%', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: 'var(--success-color)' }}>
+              <CheckCircle2 size={24} />
+            </div>
+            <div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', fontWeight: '500' }}>Completed</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: '700' }}>{completedTasks}</div>
+            </div>
           </div>
         </div>
-      </nav>
+      )}
 
-      <div className="stats-row">
-        <div className="stat-card">
-          <h3>Total Tasks</h3>
-          <p>{totalTasks}</p>
-        </div>
-        <div className="stat-card">
-          <h3>Pending</h3>
-          <p style={{ color: 'var(--text-secondary)' }}>{pendingTasks}</p>
-        </div>
-        <div className="stat-card">
-          <h3>In Progress</h3>
-          <p style={{ color: 'var(--primary-color)' }}>{inProgressTasks}</p>
-        </div>
-        <div className="stat-card">
-          <h3>Completed</h3>
-          <p style={{ color: 'var(--success-color)' }}>{completedTasks}</p>
-        </div>
-      </div>
-
-      <div className="dashboard-grid">
-        <div className="todo-panel">
-          <h2 className="panel-header">{editingTodo ? 'Edit Task' : 'Add New Task'}</h2>
-          <TodoForm 
-            initialData={editingTodo} 
-            onSubmit={handleAddOrUpdateTodo} 
-            onCancel={editingTodo ? () => setEditingTodo(null) : null}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+        <div style={{ position: 'relative', flex: '1 1 300px', maxWidth: '400px' }}>
+          <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+          <input 
+            type="text" 
+            placeholder="Search tasks..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="form-control"
+            style={{ paddingLeft: '2.5rem' }}
           />
         </div>
+        
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          {location.pathname === '/tasks' && (
+             <select className="form-control" style={{ width: 'auto' }} value={filter} onChange={(e) => setFilter(e.target.value)}>
+               <option value="All">All Status</option>
+               <option value="Pending">Pending</option>
+               <option value="In Progress">In Progress</option>
+               <option value="Completed">Completed</option>
+             </select>
+          )}
 
-        <div className="list-panel">
-          <h2 className="panel-header">Your Tasks</h2>
-          
-          <div className="toolbar">
-            <div className="search-box" style={{ position: 'relative', flex: '1 1 100%' }}>
-              <Search size={18} style={{ position: 'absolute', left: '10px', top: '12px', color: 'var(--text-secondary)' }} />
-              <input 
-                type="text" 
-                placeholder="Search tasks..." 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ width: '100%', padding: '0.6rem 1rem 0.6rem 2.5rem', borderRadius: 'var(--radius)', border: '1px solid var(--border-color)' }}
-              />
-            </div>
-            
-            <div className="form-group" style={{ margin: 0 }}>
-              <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-                <option value="All">All Status</option>
-                <option value="Pending">Pending</option>
-                <option value="In Progress">In Progress</option>
-                <option value="Completed">Completed</option>
-                <option value="High Priority">High Priority</option>
-              </select>
-            </div>
+          <select className="form-control" style={{ width: 'auto' }} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+            <option value="recentlyCreated">Recently Created</option>
+            <option value="dueDateAsc">Due Date (Earliest First)</option>
+            <option value="dueDateDesc">Due Date (Latest First)</option>
+            <option value="priorityDesc">Priority (High to Low)</option>
+            <option value="priorityAsc">Priority (Low to High)</option>
+          </select>
 
-            <div className="form-group" style={{ margin: 0 }}>
-              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-                <option value="dueDateAsc">Due Date (Earliest First)</option>
-                <option value="dueDateDesc">Due Date (Latest First)</option>
-                <option value="priorityAsc">Priority (High to Low)</option>
-                <option value="priorityDesc">Priority (Low to High)</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="todo-list">
-            {filteredAndSortedTodos.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-secondary)' }}>
-                <p>No tasks found. Try adjusting your filters or add a new task!</p>
-              </div>
-            ) : (
-              filteredAndSortedTodos.map(todo => (
-                <TodoItem 
-                  key={todo.id} 
-                  todo={todo} 
-                  onEdit={handleEditTodo} 
-                  onDelete={handleDeleteTodo}
-                  onStatusChange={handleStatusChange}
-                />
-              ))
-            )}
-          </div>
+          <button className="btn btn-primary" onClick={() => { setEditingTodo(null); setIsModalOpen(true); }}>
+            <Plus size={20} /> Add Task
+          </button>
         </div>
       </div>
-    </div>
+
+      <div className="task-list">
+        {filteredAndSortedTodos.length === 0 ? (
+          <EmptyState 
+            title={emptyState.title} 
+            message={emptyState.message} 
+            actionText={emptyState.action}
+            onAction={() => { setEditingTodo(null); setIsModalOpen(true); }}
+          />
+        ) : (
+          filteredAndSortedTodos.map(todo => (
+            <TodoItem 
+              key={todo.id} 
+              todo={todo} 
+              onEdit={openEditModal} 
+              onDelete={confirmDelete}
+              onStatusChange={handleStatusChange}
+            />
+          ))
+        )}
+      </div>
+
+      <TaskModal 
+        isOpen={isModalOpen}
+        onClose={() => { setIsModalOpen(false); setEditingTodo(null); }}
+        onSubmit={handleAddOrUpdateTodo}
+        initialData={editingTodo}
+      />
+
+      <ConfirmDialog 
+        isOpen={deleteConfirmOpen}
+        title="Delete Task"
+        message={`Are you sure you want to delete "${todoToDelete?.title}"? This action cannot be undone.`}
+        onConfirm={handleDeleteTodo}
+        onCancel={() => { setDeleteConfirmOpen(false); setTodoToDelete(null); }}
+      />
+    </>
   );
 };
 

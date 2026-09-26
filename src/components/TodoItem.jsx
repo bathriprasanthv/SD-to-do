@@ -1,77 +1,65 @@
 import React from 'react';
-import { Pencil, Trash2, CheckCircle, Circle, Clock } from 'lucide-react';
+import { Pencil, Trash2, CheckCircle2, Circle, Clock, MoreVertical } from 'lucide-react';
 
 const TodoItem = ({ todo, onEdit, onDelete, onStatusChange }) => {
-  const getPriorityClass = (priority) => {
-    switch(priority) {
-      case 'High': return 'badge-High';
-      case 'Medium': return 'badge-Medium';
-      case 'Low': return 'badge-Low';
-      default: return 'badge-Medium';
-    }
-  };
-
-  const getStatusClass = (status) => {
-    switch(status) {
-      case 'Pending': return 'badge-Pending';
-      case 'In Progress': return 'badge-In-Progress';
-      case 'Completed': return 'badge-Completed';
-      default: return 'badge-Pending';
-    }
-  };
-
   const isCompleted = todo.status === 'Completed';
+  
+  const isOverdue = !isCompleted && todo.dueDate && new Date(todo.dueDate) < new Date(new Date().setHours(0,0,0,0));
+
+  const toggleStatus = () => {
+    if (todo.status === 'Pending') onStatusChange(todo.id, 'In Progress');
+    else if (todo.status === 'In Progress') onStatusChange(todo.id, 'Completed');
+    else onStatusChange(todo.id, 'Pending');
+  };
 
   return (
-    <div className={`todo-item ${isCompleted ? 'completed' : ''}`} style={{ opacity: isCompleted ? 0.7 : 1 }}>
-      <div className="todo-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <button 
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: isCompleted ? 'var(--success-color)' : 'var(--text-secondary)' }}
-            onClick={() => onStatusChange(todo.id, isCompleted ? 'Pending' : 'Completed')}
-          >
-            {isCompleted ? <CheckCircle size={24} /> : <Circle size={24} />}
-          </button>
-          <span className="todo-title" style={{ textDecoration: isCompleted ? 'line-through' : 'none' }}>
+    <div className={`task-item ${isCompleted ? 'completed' : ''}`} style={{ opacity: isCompleted ? 0.7 : 1 }}>
+      <div style={{ display: 'flex', gap: '1rem', flex: 1 }}>
+        <button 
+          onClick={toggleStatus}
+          className="btn-icon" 
+          style={{ color: isCompleted ? 'var(--success-color)' : (todo.status === 'In Progress' ? 'var(--primary-color)' : 'var(--text-secondary)'), padding: 0 }}
+        >
+          {isCompleted ? <CheckCircle2 size={24} /> : <Circle size={24} />}
+        </button>
+        
+        <div style={{ flex: 1 }}>
+          <h4 style={{ textDecoration: isCompleted ? 'line-through' : 'none', color: isCompleted ? 'var(--text-secondary)' : 'var(--text-primary)', marginBottom: '0.25rem', fontSize: '1rem' }}>
             {todo.title}
-          </span>
-        </div>
-        <div className="todo-actions">
-          <button 
-            onClick={() => onEdit(todo)} 
-            className="btn btn-small btn-outline"
-            style={{ padding: '0.25rem 0.5rem' }}
-            title="Edit"
-          >
-            <Pencil size={16} />
-          </button>
-          <button 
-            onClick={() => onDelete(todo.id)} 
-            className="btn btn-small btn-danger"
-            style={{ padding: '0.25rem 0.5rem' }}
-            title="Delete"
-          >
-            <Trash2 size={16} />
-          </button>
+          </h4>
+          
+          {todo.description && (
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
+              {todo.description}
+            </p>
+          )}
+          
+          <div className="task-badges">
+            <span className={`badge badge-${todo.priority.replace(' ', '-')}`}>
+              {todo.priority}
+            </span>
+            <span className="badge badge-status">
+              {todo.status}
+            </span>
+            {todo.dueDate && (
+              <span className="badge badge-status" style={{ border: isOverdue ? '1px solid var(--danger-color)' : '1px solid var(--border-color)' }}>
+                <Clock size={12} style={{ color: isOverdue ? 'var(--danger-color)' : 'inherit' }} /> 
+                <span className={isOverdue ? 'overdue-text' : ''}>
+                  {new Date(todo.dueDate).toLocaleDateString()} {isOverdue && '(Overdue)'}
+                </span>
+              </span>
+            )}
+          </div>
         </div>
       </div>
       
-      {todo.description && (
-        <p className="todo-desc">{todo.description}</p>
-      )}
-
-      <div className="todo-meta">
-        <span className={`badge ${getPriorityClass(todo.priority)}`}>
-          {todo.priority} Priority
-        </span>
-        <span className={`badge ${getStatusClass(todo.status)}`}>
-          {todo.status}
-        </span>
-        {todo.dueDate && (
-          <span className="badge" style={{ background: '#f3f4f6', color: '#4b5563', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Clock size={12} /> {new Date(todo.dueDate).toLocaleDateString()}
-          </span>
-        )}
+      <div style={{ display: 'flex', gap: '0.5rem', alignSelf: 'flex-start' }}>
+        <button onClick={() => onEdit(todo)} className="btn-icon" title="Edit">
+          <Pencil size={18} />
+        </button>
+        <button onClick={() => onDelete(todo)} className="btn-icon" style={{ color: 'var(--danger-color)' }} title="Delete">
+          <Trash2 size={18} />
+        </button>
       </div>
     </div>
   );
